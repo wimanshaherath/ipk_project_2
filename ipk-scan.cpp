@@ -12,6 +12,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <ifaddrs.h>
+#include <net/if.h>
 using namespace std;
 
 /**
@@ -167,7 +168,7 @@ int main(int argc, char **argv) {
 
     //addrinfo struct for TODO LICENSE COMMENT FROM MAN PAGES getaddrinfo
     struct addrinfo *destination, hints;
-    struct sockaddr *destAddr;
+    struct sockaddr *destAddr, *sourceAddr;
 
     //get ip address from domain name
     regex ipv4pattern ("^(\\d{1,3}.\\d{1,3}.\\d{1,3}.\\d{1,3})$");
@@ -185,10 +186,68 @@ int main(int argc, char **argv) {
         destAddr = destination->ai_addr;
     }
 
-    //interface address
-    int ifAddrRet = getifaddrs();
+    //cout << inet_ntoa(((struct sockaddr_in *)destAddr)->sin_addr) << endl;
 
+    //interface address
+    struct ifaddrs *interfaces, *ifs, *source = NULL;
+    int ifAddrRet = getifaddrs(&interfaces);
+    if (ifAddrRet == 1) {
+        cerr << "Failed to obtain list of interfaces." << endl;
+        if(destination != NULL) {
+            free(destination);
+        }
+        return 1;
+    }
+    ifs = interfaces;
+    //TODO LICENSE COMENT FROM MAN PAGES getifaddrs
+    if (argFlags[0] == 1) { //interface name specified by user
+        while(ifs) {
+            if (ifs->ifa_addr == NULL) {
+                ifs = ifs->ifa_next;
+                continue;
+            }
+            if (string(ifs->ifa_name) == interface && ifs->ifa_addr->sa_family == AF_INET) {
+                source = ifs;
+                break;
+            }
+            ifs = ifs->ifa_next;
+        }
+        if (source == NULL) {
+            cerr << "Could not find specified interface." << endl;
+            if (destination != NULL) {
+                freeaddrinfo(destination);
+            }
+            freeifaddrs(interfaces);
+            return 1;
+        }
+    } else { //no interface specified by user, find first nonloopback interface
+        while(ifs) {
+            if (ifs->ifa_addr == NULL) {
+                ifs = ifs->ifa_next;
+                continue;
+            }
+            if ((ifs->ifa_addr->sa_family) == AF_INET && !(ifs->ifa_flags & IFF_LOOPBACK)) {
+                source = ifs;
+                break;
+            }
+            ifs = ifs->ifa_next;
+        }
+        if (source == NULL) {
+            cerr << "Could not find a non loopback interface." << endl;
+            if(destination != NULL) {
+                freeaddrinfo(destination);
+            }
+            freeifaddrs(interfaces);
+            return 1;
+        }
+    }
+    sourceAddr = source->ifa_addr;
+
+    //cout << inet_ntoa(((struct sockaddr_in *)sourceAddr)->sin_addr) << endl;
 
     freeaddrinfo(destination);
+    if (interfaces != NULL) {
+        freeifaddrs(interfaces);
+    }
     return 0;
 }
