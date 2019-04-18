@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <ifaddrs.h>
 using namespace std;
 
 /**
@@ -143,22 +144,6 @@ int parseOpts(int argc, char **argv, int *argFlags, string *interface, vector<in
     return 0;
 }
 
-int getIp(string *target, struct addrinfo* addr) {
-
-    struct addrinfo hints;
-    memset(&hints, 0 , sizeof(hints));
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_DGRAM;
-    hints.ai_protocol = 0;
-    hints.ai_protocol = 0;
-    int addinfoRet = getaddrinfo(&(*target->c_str()), NULL, &hints, &addr);
-    if (addinfoRet != 0) {
-        return 1;
-    }
-    return 0;
-}
-
-
 int main(int argc, char **argv) {
 
     //containers for command line arguments
@@ -180,22 +165,30 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    //addrinfo struct for TODO LICENSE COMMENT FROM WIKIPEDIA getaddrinfo
-    struct addrinfo *destination, current;
+    //addrinfo struct for TODO LICENSE COMMENT FROM MAN PAGES getaddrinfo
+    struct addrinfo *destination, hints;
     struct sockaddr *destAddr;
 
+    //get ip address from domain name
     regex ipv4pattern ("^(\\d{1,3}.\\d{1,3}.\\d{1,3}.\\d{1,3})$");
     if(!regex_match(target, ipv4pattern)) {
-        int ipRet = getIp(&target, destination);
-        if (ipRet == 1) {
+        memset(&hints, 0 , sizeof(hints));
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_DGRAM;
+        hints.ai_protocol = 0;
+        hints.ai_protocol = 0;
+        int addrInfoRet = getaddrinfo(&(*target.c_str()), NULL, &hints, &destination);
+        if (addrInfoRet == 1) {
             cerr << "Failed to obtain address from specified domain name." << endl;
             return 1;
         }
+        destAddr = destination->ai_addr;
     }
 
-    destAddr = destination->ai_addr;
+    //interface address
+    int ifAddrRet = getifaddrs();
 
-    cout << inet_ntoa(((struct sockaddr_in *)destAddr)->sin_addr) << endl;
 
+    freeaddrinfo(destination);
     return 0;
 }
