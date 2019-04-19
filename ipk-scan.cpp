@@ -9,11 +9,21 @@
 #include <netdb.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <net/if.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
 using namespace std;
+
+struct tcpPhdr { //custom tcp pseudoheader
+    u_int32_t source;
+    u_int32_t dest;
+    u_int8_t zeros=0;
+    u_int8_t protocol;
+    u_int16_t tcplen;
+};
 
 /**
  * Function that parses and checks validity of arguments, then fills the respective containers.
@@ -124,7 +134,7 @@ int parseOpts(int argc, char **argv, int *argFlags, string *interface, vector<in
                             return 1;
                         }
                         for (int i = from; i <= to; i++) {
-                            pu_ports->push_back(i);
+                            pt_ports->push_back(i);
                         }
                     } else {
                         cerr << "Invalid argument of option -pu." << endl;
@@ -145,8 +155,17 @@ int parseOpts(int argc, char **argv, int *argFlags, string *interface, vector<in
     return 0;
 }
 
-int main(int argc, char **argv) {
+unsigned short tcpsum(unsigned short *buf, int len) { //TODO LICENSE COMMENT TENOUK module43a
+    unsigned long sum;
+    for (sum = 0; len > 0; len--) {
+        sum += *buf++;
+    }
+    sum = (sum >> 16) + (sum &0xffff);
+    sum += (sum >> 16);
+    return (unsigned short) (~sum);
+}
 
+int main(int argc, char **argv) {
     //containers for command line arguments
     int argFlags[3] = {0}; //0 = i, 1 = pu, 2 = pt
     string interface;
@@ -168,7 +187,7 @@ int main(int argc, char **argv) {
 
     //addrinfo struct for TODO LICENSE COMMENT FROM MAN PAGES getaddrinfo
     struct addrinfo *destination, hints;
-    struct sockaddr *destAddr, *sourceAddr;
+    struct sockaddr_in *destAddr, *sourceAddr;
 
     //get ip address from domain name
     regex ipv4pattern ("^(\\d{1,3}.\\d{1,3}.\\d{1,3}.\\d{1,3})$");
@@ -183,7 +202,7 @@ int main(int argc, char **argv) {
             cerr << "Failed to obtain address from specified domain name." << endl;
             return 1;
         }
-        destAddr = destination->ai_addr;
+        destAddr = (struct sockaddr_in *)destination->ai_addr;
     }
 
     //cout << inet_ntoa(((struct sockaddr_in *)destAddr)->sin_addr) << endl;
@@ -198,6 +217,7 @@ int main(int argc, char **argv) {
         }
         return 1;
     }
+
     ifs = interfaces;
     //TODO LICENSE COMENT FROM MAN PAGES getifaddrs
     if (argFlags[0] == 1) { //interface name specified by user
@@ -241,9 +261,89 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
-    sourceAddr = source->ifa_addr;
+    
+    sourceAddr = (struct sockaddr_in *)source->ifa_addr;
 
     //cout << inet_ntoa(((struct sockaddr_in *)sourceAddr)->sin_addr) << endl;
+
+    //tcp
+    if (argFlags[2] == 1) { //TODO LICENSE COMMENT FROM TENOUK module43a
+        int one = 1;
+        const int *val = &one;
+               
+        int sock = socket(PF_INET, SOCK_RAW, IPPROTO_TCP);
+        if (sock < 0) {
+            cerr << "Error opening socket." << endl;
+            return 1;
+        }
+
+        if (setsockopt(sock, IPPROTO_IP, IP_HDRINCL, val, sizeof(one)) < 0) {
+            cerr << "Error setting socket options." << endl;
+            return 1;
+        }
+
+        //header size
+        char buffer[8192];
+        char buffer2[8192];
+        memset(buffer, 0, 8192);
+        memset(buffer2, 0, 8192);
+
+        for (unsigned int i = 0; i < pt_ports.size(); i++) {
+            //address family
+            sourceAddr->sin_family = AF_INET;
+            destAddr->sin_family = AF_INET;
+
+            //ports
+            sourceAddr->sin_port = htons(50000);
+            destAddr->sin_port = htons(pt_ports[i]);
+
+            //fill pseudotcp header
+            struct tcpPhdr *tcpPh = (struct tcpPhdr *) buffer;
+            tcpPh->source = inet_addr(inet_ntoa(sourceAddr->sin_addr));
+            tcpPh->dest = inet_addr(inet_ntoa(destAddr->sin_addr));
+            tcpPh->protocol = 6;
+            tcpPh->tcplen = htons(sizeof(struct tcphdr));
+
+            //create and fill tcp header
+            struct tcphdr *tcph = (struct tcphdr *) (buffer + sizeof(struct tcpPhdr));
+            tcph->th_off = 5;
+            tcph->th_sport = htons(50000);
+            tcph->th_dport = htons(pt_ports[i]);
+            tcph->th_seq = htonl(1);
+            tcph->th_ack = 0;
+            tcph->th_win = htons(32767);
+            tcph->th_sum = 0;
+            tcph->th_urp = 0;
+            tcph->th_flags = TH_SYN;
+
+            //calculate tcp checksum
+            tcph->th_sum = tcpsum((unsigned short *) buffer, (sizeof(struct tcpPhdr) + sizeof(struct tcphdr)));
+
+            //create and fill ip header
+            struct ip *iph = (struct ip *) buffer2;
+            iph->ip_hl = 5;
+            iph->ip_v = 4;
+            iph->ip_tos = 16;
+            iph->ip_len = sizeof(struct ip) + sizeof(struct tcphdr);
+            iph->ip_id = htons(54321);
+            iph->ip_off = 0;
+            iph->ip_ttl = 64;
+            iph->ip_p = 6;
+            iph->ip_sum = 0;
+            iph->ip_src = sourceAddr->sin_addr;
+            iph->ip_dst = destAddr->sin_addr;
+
+            memcpy(buffer2 + sizeof(struct ip), buffer + sizeof(struct tcpPhdr), sizeof(struct tcphdr));
+
+            //calculate ip sum
+            iph->ip_sum = tcpsum((unsigned short *) buffer2, (sizeof(struct ip) + sizeof(struct tcphdr)));
+            
+            if (sendto(sock, buffer2, iph->ip_len, 0, (struct sockaddr *)destAddr, sizeof(struct sockaddr_in)) < 0) {
+                perror("sendto() error");
+                return 1;
+            }
+        }
+    }
 
     freeaddrinfo(destination);
     if (interfaces != NULL) {
