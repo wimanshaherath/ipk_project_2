@@ -15,7 +15,9 @@
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
+#include <netinet/if_ether.h>
 #include <pcap.h>
+#include <signal.h>
 using namespace std;
 
 struct tcpPhdr { //custom tcp pseudoheader
@@ -25,6 +27,8 @@ struct tcpPhdr { //custom tcp pseudoheader
     u_int8_t protocol;
     u_int16_t tcplen;
 };
+
+pcap_t *handle; //handle for packet capture
 
 /**
  * Function that parses and checks validity of arguments, then fills the respective containers.
@@ -166,6 +170,26 @@ unsigned short tcpsum(unsigned short *buf, int len) { //TODO LICENSE COMMENT TEN
     return (unsigned short) (~sum);
 }
 
+void tcp_packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_char *packet) {
+    //TODO LICENSE COMMENT DEVDUNGEON using libpcap in C
+    struct ether_header *ethhdr = (struct ether_header *) packet;
+    struct ip *ip = (struct ip *) (packet + sizeof(struct ether_header));
+    int ip_len = ip->ip_hl*4;
+    struct tcphdr *tcp = (struct tcphdr *) (packet + sizeof(struct ether_header) + ip_len);
+    
+    if (tcp->th_flags == (TH_RST + TH_ACK)) { //constant from netinet/tcp.h
+        cout << "closed" << endl;
+    } else {
+        cout << "open" << endl;
+    }
+
+    return;
+}
+
+void timeout_handler(int sig) {
+    pcap_breakloop(handle);
+}
+
 int main(int argc, char **argv) {
     //containers for command line arguments
     int argFlags[3] = {0}; //0 = i, 1 = pu, 2 = pt
@@ -206,7 +230,7 @@ int main(int argc, char **argv) {
         destAddr = (struct sockaddr_in *)destination->ai_addr;
     }
 
-    //cout << inet_ntoa(((struct sockaddr_in *)destAddr)->sin_addr) << endl;
+    //cout << inet_ntoa(destAddr->sin_addr) << endl;
 
     //interface address
     struct ifaddrs *interfaces, *ifs, *source = NULL;
@@ -249,6 +273,7 @@ int main(int argc, char **argv) {
             }
             if ((ifs->ifa_addr->sa_family) == AF_INET && !(ifs->ifa_flags & IFF_LOOPBACK)) {
                 source = ifs;
+                interface = string(ifs->ifa_name);
                 break;
             }
             ifs = ifs->ifa_next;
@@ -265,8 +290,9 @@ int main(int argc, char **argv) {
     
     sourceAddr = (struct sockaddr_in *)source->ifa_addr;
 
-    //cout << inet_ntoa(((struct sockaddr_in *)sourceAddr)->sin_addr) << endl;
-
+    //cout << inet_ntoa(sourceAddr->sin_addr) << endl;
+    cout << "Interesting ports on " + target + ":" << endl;
+    cout << "PORT        STATE" << endl;
     //tcp
     if (argFlags[2] == 1) { //TODO LICENSE COMMENT FROM TENOUK module43a
         int one = 1;
@@ -284,15 +310,9 @@ int main(int argc, char **argv) {
         }
         //initialize pcap handle TODO LICENSE COMMENT FROM DEVDUNGEON using libpcap in c
         char pcap_err_buffer[PCAP_ERRBUF_SIZE];
-        pcap_t *handle = pcap_create(interface.c_str(), pcap_err_buffer);
-        pcap_set_rfmon(handle, 1);
-        pcap_set_promisc(handle, 1);
-        pcap_set_snaplen(handle, 2048);
-        pcap_set_timeout(handle, 2000);
-        pcap_activate(handle);
-
-        //pcap filter variables
         struct bpf_program filter;
+
+        int repeatFiltered = 0;
 
         //header size
         char buffer[8192];
@@ -301,10 +321,17 @@ int main(int argc, char **argv) {
         memset(buffer2, 0, 8192);
 
         for (unsigned int i = 0; i < pt_ports.size(); i++) {
-            
-            //set pcap filter
+            if (repeatFiltered == 0) { //print ports only once
+                cout << to_string(pt_ports[i]) + "/tcp      ";
+            }
+            //set pcap
+            handle = pcap_open_live(interface.c_str(), BUFSIZ, 1, 1000, pcap_err_buffer);
+            if (handle == NULL) {
+                cerr << "Could not create pcap handle." << endl;
+                return 1;
+            }
             string pcap_filter = "tcp and src port " + to_string(pt_ports[i]) + " and dst port 50000";
-            int pcompileRet = pcap_compile(handle, &filter, pcap_filter.c_str(), 1, PCAP_NETMASK_UNKNOWN);
+            int pcompileRet = pcap_compile(handle, &filter, pcap_filter.c_str(), 0, PCAP_NETMASK_UNKNOWN);
             if (pcompileRet == -1) {
                 cerr << "Could not compile filter string." << endl;
                 return 1;
@@ -370,14 +397,27 @@ int main(int argc, char **argv) {
                 return 1;
             }
 
-            //capture and process packet
-            const u_char *packet;
-            struct pcap_pkthdr packet_hdr;
-            
-
+            //capture and process packetr;
+            if (repeatFiltered == 0) { //LICENSE COMMENT listening using pcap with timeout
+                alarm(2);
+                signal(SIGALRM, timeout_handler);
+                if (pcap_loop(handle, 1, tcp_packet_handler, NULL) < 0) {
+                    repeatFiltered = 1;
+                    i -= 1;
+                } 
+            } else {
+                alarm(2);
+                signal(SIGALRM, timeout_handler);
+                if (pcap_loop(handle, 1, tcp_packet_handler, NULL) < 0) {
+                    cout << "filtered" << endl;
+                    repeatFiltered = 0;
+                }
+            }
+            pcap_freecode(&filter);
         }
-        //pcap_close(handle);
-    }      
+        pcap_close(handle);
+    }
+
     freeaddrinfo(destination);
     if (interfaces != NULL) {
         freeifaddrs(interfaces);
