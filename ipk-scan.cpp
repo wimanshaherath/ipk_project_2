@@ -15,6 +15,7 @@
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
+#include <pcap.h>
 using namespace std;
 
 struct tcpPhdr { //custom tcp pseudoheader
@@ -281,6 +282,17 @@ int main(int argc, char **argv) {
             cerr << "Error setting socket options." << endl;
             return 1;
         }
+        //initialize pcap handle TODO LICENSE COMMENT FROM DEVDUNGEON using libpcap in c
+        char pcap_err_buffer[PCAP_ERRBUF_SIZE];
+        pcap_t *handle = pcap_create(interface.c_str(), pcap_err_buffer);
+        pcap_set_rfmon(handle, 1);
+        pcap_set_promisc(handle, 1);
+        pcap_set_snaplen(handle, 2048);
+        pcap_set_timeout(handle, 2000);
+        pcap_activate(handle);
+
+        //pcap filter variables
+        struct bpf_program filter;
 
         //header size
         char buffer[8192];
@@ -289,6 +301,21 @@ int main(int argc, char **argv) {
         memset(buffer2, 0, 8192);
 
         for (unsigned int i = 0; i < pt_ports.size(); i++) {
+            
+            //set pcap filter
+            string pcap_filter = "tcp and src port " + to_string(pt_ports[i]) + " and dst port 50000";
+            int pcompileRet = pcap_compile(handle, &filter, pcap_filter.c_str(), 1, PCAP_NETMASK_UNKNOWN);
+            if (pcompileRet == -1) {
+                cerr << "Could not compile filter string." << endl;
+                return 1;
+            }
+
+            int psetfilRet = pcap_setfilter(handle, &filter);
+            if (psetfilRet == -1) {
+                cerr << "Could not set pcap filter." << endl;
+                return 1;
+            }
+
             //address family
             sourceAddr->sin_family = AF_INET;
             destAddr->sin_family = AF_INET;
@@ -342,9 +369,15 @@ int main(int argc, char **argv) {
                 perror("sendto() error");
                 return 1;
             }
-        }
-    }
 
+            //capture and process packet
+            const u_char *packet;
+            struct pcap_pkthdr packet_hdr;
+            
+
+        }
+        //pcap_close(handle);
+    }      
     freeaddrinfo(destination);
     if (interfaces != NULL) {
         freeifaddrs(interfaces);

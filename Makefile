@@ -6,7 +6,7 @@ EXECUTABLE = ipk-scan
 all: ipk-scan.o
 
 ipk-scan.o:
-	$(CPP) -g -o $(EXECUTABLE) $(CPPFLAGS) $(EXECUTABLE).cpp
+	$(CPP) -g -o $(EXECUTABLE) $(CPPFLAGS) $(EXECUTABLE).cpp -lpcap
 
 clean:
 	rm $(EXECUTABLE)
