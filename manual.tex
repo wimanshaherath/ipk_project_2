@@ -1,0 +1,84 @@
+\documentclass[a4paper, 11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[text={170mm, 240mm}, left=20mm, top=30mm]{geometry}
+\usepackage[czech]{babel}
+\usepackage[unicode]{hyperref}
+\usepackage{times}
+\usepackage{url}
+
+\begin{document}
+	\begin{titlepage}
+		\begin{center}
+			{\Huge \textsc{Vysoké učení technické v Brně\\[0,3em]{\huge Fakulta informačních technologií}}}\\
+\vspace{\stretch{0.382}}
+			{{\Huge Počítačové komunikace a sítě - projekt 2}\\[0,4em]{\Huge Scanner síťových služeb}}\\
+\vspace{\stretch{0.618}}
+		\end{center}
+		{\Large \today \hfill Karel Hanák}
+	\end{titlepage}
+	
+	\tableofcontents
+	\newpage
+
+\section{Zadání}
+Úkolem bylo vytvořit aplikaci, která provede sken zadané IP adresy a portů. Aplikace dostane doménu, ze které vyhodnotí IP adresu, nebo dostane přímo IP adresu. Dále dostane seznam či rozsah portů, které pro dané zařízení oskenovat, vyhodnotit stav daných portů a vypsat jej na standardní výstup.
+
+\section{Protokoly}	
+\subsection{Internet Protocol}
+Internet protocol je navržen pro komunikaci systémů a zařízení v počítačové síti. Jeho úkolem je přesun datagramů skrze množinu sítí postupně od odesílatele ke příjemci. Datagramy nebo také pakety se skládají z fragmentu a dat.
+Fragment obsahuje informace potřebné k doručení paketu zatímco data představují přesouvané informace \cite{iprfc}. Každý paket obsahuje IP adresu odesílatele i příjemce, které slouží jako jednoznačné identifikátory síťových rozhraní a používají se pro směrování \cite{iprotocol}. 
+
+\subsection{Transmission Control Protocol}
+Transmission control protocol je jedním z TPC/IP protokolů a slouží k navázání spojení mezi počítači připojenými do sítě a k spolehlivému obousměrnému přenosu dat. Protokol zajišťuje doručení všech paketů a ve správném pořadí. Spolehlivost zajišťuje odesíláním paketů, které byly poškozeny či ztraceny, dokud skutečně nedojdou od odesílatele k příjemci nebo dokud nevyprší časový limit a spojení je ukončeno. Je vhodný pro použití, když je nutné aby všechna data byla doručena vyšší režie není problém \cite{tcprotocol}. 
+
+\subsection{User Datagram Protocol}
+User datagram protocol je také jedním z TCP/IP protokolů, který podobně jako TCP slouží k přenosu datagramů od odesílatele k příjemci s tím rozdílem, že UDP nezaručuje doručení paketů příjemci. Oproti TCP jej nezajímá, zda je paket správně doručený, pouze jej odešle pokud je v pořádku. Je vhodný pro použití, když nám jde o rychlost přenosu dat a menší režii \cite{udprotocol}. 
+
+\section{Skenování portů}
+Skenování portů je metoda zjišťování stavu síťových portů zařízen v počítačové síti. Rozlišují se 3 základní stavy portů \cite{portscan}:
+	\begin{enumerate}
+		\item Otevřený - Stav portu, na němž nějaká služba naslouchá a čeká na připojení klienta.
+		\item Zavřený - Stav portu, na němž neběží žádná služba, a tedy skrze něj nebude možné navázat spojení.
+		\item Filtrovaný - Stav portu, kdy host neposkytl žádnou odpověď.
+	\end{enumerate}
+V tomto projektu nás zajímá pouze SYN a UDP skenování.
+\subsection{SYN skenování}
+SYN skenování je forma TCP skenování, ale narozdíl od klasického TCP skenování nedochází k navázání skutečného spojení. Místo toho aplikace pro skenování portů vytvoří SYN packet a odešle jej. Pokud testovaný port otevřený, odešle zpět paket s příznaky SYN a ACK. Pokud se nám vrátí RST paket, tak se jedná o zavřený port. A nakonec pokud se nevrátí žádná odpověď, jde o filtrovaný port \cite{portscan}. 
+\subsection{UDP skenování}
+UDP skenování je docela odlišné, protokol UDP není navržen pro navazování spojení a tak neexistuje UDP ekvivalent TCP SYN, pokud je však odeslán UDP paket a systém odpoví s ICMP port unreachable zprávou, testovaný port se považuje za zavřený. O tom zda je port otevřený touto metodou nelze vždy správně rozhodnout \cite{portscan}. 
+
+\section{Implementační detaily}
+Ve zdrojovém kódu jsou uvedeny reference k převzatým částem kódu včetně odkazu pro bližší kontext.
+\subsection{Zpracování vstupních argumentů}
+Zpracování vstupních argumentů je prováděno pomocí funkce \texttt{getopt\_long\_only}\footnote{Linux man page getopt\_long\_only \url{https://linux.die.net/man/3/getopt_long_only}}, která narozdíl od předchozích verzí funkce registruje argumenty s \texttt{-} i \texttt{--} a usnadňuje tak zpracování víceznakových krátkých zápisů možností. Pro kontrolu formátů zápisu argumentů s porty se používají regulární výrazy. U výčtu argumentů se poté získaný validní řetězec rozdělí podle oddělovače a do vektoru celých čísel uloží číslo portu. Obdobně je to tak i v případě rozsahu portů, s tím rozdílem že stačí kraje rozsahů použít jako řídící proměnné cyklu který vloží porty do příslušného vektoru.
+
+\subsection{IP adresa cílového zařízení}
+Řetězec obsahující IP adresu nebo doménu se zkontroluje regulárním výrazem, pokud se jedná přímo o IP adresu, tak se pomocí funkce \texttt{inet\_aton} \footnote{Linux man page inet\_aton \url{https://linux.die.net/man/3/inet_aton}} převede na strukturu, se kterou se později pracuje. Pokud je však zadána doména, je potřeba ip adresu získat, k tomu slouží funkce \texttt{getaddrinfo} \footnote{Linux manual page getaddrinfo \url{http://man7.org/linux/man-pages/man3/getaddrinfo.3.html}}.
+
+\subsection{IP adresa zdrojového rozhraní}
+Rozhraní je volitelný urgument specifikovaný uživatelem, pokud je zadán název rozhraní, tak se pomocí funkce \texttt{getifaddrs} \footnote{Linux man page getifaddrs \url{https://linux.die.net/man/3/getifaddrs}} získá seznam rozhraní a hledá se v něm rozhraní s odpovídajícím názvem. Pokud rozhraní není specifikováno, tak se použije stejná funkce k vyhledání prvního neloopbackového rozhraní.
+
+\subsection{SYN skenování}
+Nejpve se otevře socket pro UDP protokol a připraví se pro odeslání paketu. Dále se vytvoří 2 buffery, do kterých se budou mapovat pakety a vynulují se. Následuje nastavení zachytávání příchozích paketů, k zachytávání paketu se využívá knihovna \texttt{pcap} \footnote{Manpage of PCAP \url{https://www.tcpdump.org/manpages/pcap.3pcap.html}}. Nejprve se vytvoří handle pro zachytávání paketů, poté se sestaví filtrovací řetězec, který se zkompiluje do struktury, se kterou pak dokáže knihovna dále pracovat. Pro handle se nastaví zkompilovaný filtr a tím je připravený na zachytávání paketů. \\
+
+\noindent Po vytvoření filtru je třeba sestavit samotný paket, který budeme odesílat. Dříve získané struktury obsahující IP adresy zdrojového rozhraní a cílového zařízení se doplní o porty a specifikuje se IPv4 protokol. Následuje vytvoření a naplnění struktur. Z knihoven \texttt{netinet/ip.h} a \texttt{netinet/tcp.h} se využijí struktury pro IP a TCP hlavičky. Hlavičky se naplní metadaty pro odeslání a je potřeba provést kontrolní výpočet pro TCP paket. V případě TCP paketu se také vytvoří pseudo-TCP hlavička, která simuluje hlavičku IP paketu \cite{checksumwiki}. Obě struktury jsou uloženy za sebou v jednom z dříve vytvořených bufferů. Z těchto dvou naplněných struktur se provede kontrolní výpočet a pseudo-TCP dále není potřeba. Do druhého bufferu se uloží skutečná IP hlavička a za ni skutečná TCP hlavička. Tentokrát se provede výpočet kontrolního součtu pro IP.\\
+
+\noindent Po přípravě hlaviček a výpočtu kontrolních součtů se paket odešle skrze socket a předem připravený handle s filtrem následně zachytává příchozí pakety od zařízení, na které se TCP paket odesílal. Na přijetí odpovědi je timeout nastaven na 2 sekundy, pokud do té doby byl zachycen žádný paket, provede se celá iterace znovu a pokud ani podruhé nepřijde žádný paket, je port označen jako filtrovaný. Zachycený paket se namapuje zpět na struktury IP a TCP hlaviček a podle metadat se určí stav portu a vypíše se na standardní výstup. Tento postup je pak opakován pro každý port.
+
+\subsection{UDP skenování}
+UDP skenování probíhá velmi podobným způsobem s několika málo rozdíly. Otevíraný socket se nastaví pro protokol UDP.
+Zachytávání paketů probíhá stejným způsobem, ale s jiným filtrovacím řetězcem. Ve filtrovacím řetězci se specifikuje ICMP odpověď typu unreachable port, která přijde od cílového zařízení zpět na zdrojové.\\
+
+\noindent Příprava hlaviček pro vytvoření paketu je opět obdobná, akorát se místo TCP hlavičky použije UDP hlavička. IP a UDP hlavičky se naplní a pro IP se vypočítá kontrolní součet. Pro UDP hlavičku u protokolu IPv4 není nutné kontrolní součet vypočítávat \cite{udpchecksum}.\\
+
+\noindent Po naplnění hlaviček a výpočtu kontrolního součtu se paket opět odešle krze socket a opět se čeká na příchozí data. Tentokrát čekáme na ICMP zprávu port unreachable, pokud taková zpráva dojde, port je označen jako zavřený, jinak je port označen jako otevřený a nakonec je jeho stav vypsaný na standardní výstup. Zde se paket neodesílá znovu. Tento postup je pak opakován pro každý port.
+
+\section{Testování}
+Testování bylo provedeno na poskytnutém virtuálním stroji a zároveň na osobním stroji. K ověření funkčnosti byl použity nástroje \texttt{Nmap} \footnote{Nmap \url{https://nmap.org}} a \texttt{Wireshark} \footnote{Wireshark \url{https://www.wireshark.org}}. Na osobním stroji se testovaly porty na localhost z loopback interface, stejně tak na virtuálním stroji. Wireshark byl použit ke sledování odchozích a příchozích paketů, Nmap pro stav portů.
+
+\newpage
+\section{Použití literatura}
+\renewcommand{\refname}{}
+\bibliographystyle{czechiso}
+\bibliography{sources}	
+\end{document}

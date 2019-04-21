@@ -310,7 +310,7 @@ int main(int argc, char **argv) {
         int addrInfoRet = getaddrinfo(&(*target.c_str()), NULL, &hints, &destination);
         if (addrInfoRet == 1) {
             cerr << "Failed to obtain address from specified domain name." << endl;
-            return 1;
+            return 2;
         }
         destAddr = (struct sockaddr_in *)destination->ai_addr;
     } else {
@@ -332,7 +332,7 @@ int main(int argc, char **argv) {
         if(destination != NULL) {
             free(destination);
         }
-        return 1;
+        return 2;
     }
 
     ifs = interfaces;
@@ -354,7 +354,7 @@ int main(int argc, char **argv) {
                 freeaddrinfo(destination);
             }
             freeifaddrs(interfaces);
-            return 1;
+            return 2;
         }
     } else { //no interface specified by user, find first nonloopback interface
         while(ifs) {
@@ -362,7 +362,7 @@ int main(int argc, char **argv) {
                 ifs = ifs->ifa_next;
                 continue;
             }
-            if ((ifs->ifa_addr->sa_family) == AF_INET && !(ifs->ifa_flags & IFF_LOOPBACK)) {
+            if ((ifs->ifa_addr->sa_family) == AF_INET && !(ifs->ifa_flags & IFF_LOOPBACK)) { //constants in net/if.h
                 source = ifs;
                 interface = string(ifs->ifa_name);
                 break;
@@ -375,7 +375,7 @@ int main(int argc, char **argv) {
                 freeaddrinfo(destination);
             }
             freeifaddrs(interfaces);
-            return 1;
+            return 2;
         }
     }
     
@@ -399,12 +399,12 @@ int main(int argc, char **argv) {
         int sock = socket(PF_INET, SOCK_RAW, IPPROTO_TCP);
         if (sock < 0) {
             cerr << "Error opening socket." << endl;
-            return 1;
+            return 3;
         }
 
         if (setsockopt(sock, IPPROTO_IP, IP_HDRINCL, val, sizeof(one)) < 0) {
             cerr << "Error setting socket options." << endl;
-            return 1;
+            return 3;
         }
 
         //header size
@@ -434,19 +434,19 @@ int main(int argc, char **argv) {
             handle = pcap_open_live(interface.c_str(), BUFSIZ, 1, 1000, pcap_err_buffer);
             if (handle == NULL) {
                 cerr << "Could not create pcap handle." << endl;
-                return 1;
+                return 4;
             }
             string pcap_filter = "tcp and src port " + to_string(pt_ports[i]) + " and dst port 50000";
             int pcompileRet = pcap_compile(handle, &filter, pcap_filter.c_str(), 0, PCAP_NETMASK_UNKNOWN);
             if (pcompileRet == -1) {
                 cerr << "Could not compile filter string." << endl;
-                return 1;
+                return 4;
             }
 
             int psetfilRet = pcap_setfilter(handle, &filter);
             if (psetfilRet == -1) {
                 cerr << "Could not set pcap filter." << endl;
-                return 1;
+                return 4;
             }
 
             /***************************************************************************************
@@ -507,7 +507,7 @@ int main(int argc, char **argv) {
             
             if (sendto(sock, buffer2, iph->ip_len, 0, (struct sockaddr *)destAddr, sizeof(struct sockaddr_in)) < 0) {
                 perror("sendto() error");
-                return 1;
+                return 3;
             }
 
             /***************************************************************************************
@@ -553,12 +553,12 @@ int main(int argc, char **argv) {
         int sock = socket(PF_INET, SOCK_RAW, IPPROTO_UDP);
         if (sock < 0) {
             cerr << "Error opening socket." << endl;
-            return 1;
+            return 3;
         }
 
         if (setsockopt(sock, IPPROTO_IP, IP_HDRINCL, val, sizeof(one)) < 0) {
             cerr << "Error setting socket options." << endl;
-            return 1;
+            return 3;
         }
 
         //header size
@@ -586,13 +586,19 @@ int main(int argc, char **argv) {
             handle = pcap_open_live(interface.c_str(), BUFSIZ, 1, 1000, pcap_err_buffer);
             if (handle == NULL) {
                 cerr << "Could not create pcap handle." << endl;
-                return 1;
+                return 4;
             }
             string pcap_filter = "icmp and icmp[icmptype] == 3 and icmp[icmpcode] == 3 and dst " + string(inet_ntoa(sourceAddr->sin_addr)) + " and src " + string(inet_ntoa(destAddr->sin_addr));
             int pcompileRet = pcap_compile(handle, &filter, pcap_filter.c_str(), 0, PCAP_NETMASK_UNKNOWN);
             if (pcompileRet == -1) {
                 cerr << "Could not compile filter string." << endl;
-                return 1;
+                return 4;
+            }
+
+            int psetfilRet = pcap_setfilter(handle, &filter);
+            if (psetfilRet == -1) {
+                cerr << "Could not set pcap filter." << endl;
+                return 4;
             }
 
             /***************************************************************************************
@@ -636,7 +642,7 @@ int main(int argc, char **argv) {
         
             if (sendto(sock, buffer, iph->ip_len, 0, (struct sockaddr *)destAddr, sizeof(struct sockaddr_in)) < 0) {
                 perror("sendto() error");
-                return 1;
+                return 3;
             }
 
             /***************************************************************************************

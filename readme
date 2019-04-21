@@ -1,0 +1,24 @@
+IPK Projekt 2 - Scanner síťových služeb
+=============================================
+Překlad:
+	make
+
+Spuštění programu:
+	sudo ./ipk-scan {-i <interface>} -pu <port-ranges> -pt <port-ranges> [ <domain-name> | <IP-address> ]
+
+Parametry:
+	-i <interface> 				  - volitelný argument pro specifikaci názvu rozhraní, pokud není zadán, použije se první neloopbackové rozhraní
+	-pu <port-ranges>			  - specifikuje skenované udp porty, akceptované formáty portů jsou 20,80,50000 nebo 20-30
+	-pt <port-ranges>			  - specifikuje skenované tcp porty, akceptované formáty portů jsou 20,80,50000 nebo 20-30
+	-<domain-name> | <IP-address> - povinný argument, specifikuje doménu nebo IP adresu skenovaného stroje
+
+Návratové hodnoty: 
+	0 - Program skončil úspěšně
+	Ostatní návratové hodnoty jsou doprovázené odpovídajícím výpisem na standardní chybový výstup.
+	1 - Chyba zadaných argumentů
+	2 - Chyba při získávání IP adres zdrojového nebo skenovaného stroje
+	3 - Chyba při práci se sockety
+	4 - Chyba při zachytávání paketů
+
+Omezení:
+	Program podporuje pouze protokol IPv4.
