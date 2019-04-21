@@ -189,17 +189,7 @@ void tcp_packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_
 }
 
 void udp_packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_char *packet) {
-    struct ether_header *ethhdr = (struct ether_header *) packet;
-    struct ip *ip = (struct ip *) (packet + sizeof(struct ether_header));
-    int ip_len = ip->ip_hl*4;
-    struct icmphdr *icmp = (struct icmphdr *) (packet + sizeof(struct ether_header) + ip_len);
-    
-    if (icmp->type == ICMP_DEST_UNREACH) { //constant from netinet/ip_icmp.h
-        cout << "closed" << endl;
-    } else {
-        cout << "open" << endl;
-    }
-
+    cout << "closed" << endl;
     return;
 }
 
@@ -474,7 +464,7 @@ int main(int argc, char **argv) {
                 cerr << "Could not create pcap handle." << endl;
                 return 1;
             }
-            string pcap_filter = "udp and src port " + to_string(pu_ports[i]) + " and dst port 50000";
+            string pcap_filter = "icmp and icmp[icmptype] == icmp-unreach and dst " + string(inet_ntoa(sourceAddr->sin_addr)) + " and src " + string(inet_ntoa(destAddr->sin_addr));
             int pcompileRet = pcap_compile(handle, &filter, pcap_filter.c_str(), 0, PCAP_NETMASK_UNKNOWN);
             if (pcompileRet == -1) {
                 cerr << "Could not compile filter string." << endl;
@@ -517,8 +507,12 @@ int main(int argc, char **argv) {
                 return 1;
             }
 
-            //fix packet capture
-            pcap_loop(handle, 1, udp_packet_handler, NULL);
+            alarm(2);
+            signal(SIGALRM, timeout_handler);
+            if(pcap_loop(handle, 1, udp_packet_handler, NULL) < 0) {
+                cout << "open" << endl;
+            }
+            
             pcap_freecode(&filter);
         }
         pcap_close(handle);
