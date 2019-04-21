@@ -15,7 +15,9 @@
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
+#include <netinet/udp.h>
 #include <netinet/if_ether.h>
+#include <netinet/ip_icmp.h>
 #include <pcap.h>
 #include <signal.h>
 using namespace std;
@@ -160,7 +162,7 @@ int parseOpts(int argc, char **argv, int *argFlags, string *interface, vector<in
     return 0;
 }
 
-unsigned short tcpsum(unsigned short *buf, int len) { //TODO LICENSE COMMENT TENOUK module43a
+unsigned short csum(unsigned short *buf, int len) { //TODO LICENSE COMMENT TENOUK module43a
     unsigned long sum;
     for (sum = 0; len > 0; len--) {
         sum += *buf++;
@@ -178,6 +180,21 @@ void tcp_packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_
     struct tcphdr *tcp = (struct tcphdr *) (packet + sizeof(struct ether_header) + ip_len);
     
     if (tcp->th_flags == (TH_RST + TH_ACK)) { //constant from netinet/tcp.h
+        cout << "closed" << endl;
+    } else {
+        cout << "open" << endl;
+    }
+
+    return;
+}
+
+void udp_packet_handler(u_char *args, const struct pcap_pkthdr *header, const u_char *packet) {
+    struct ether_header *ethhdr = (struct ether_header *) packet;
+    struct ip *ip = (struct ip *) (packet + sizeof(struct ether_header));
+    int ip_len = ip->ip_hl*4;
+    struct icmphdr *icmp = (struct icmphdr *) (packet + sizeof(struct ether_header) + ip_len);
+    
+    if (icmp->type == ICMP_DEST_UNREACH) { //constant from netinet/ip_icmp.h
         cout << "closed" << endl;
     } else {
         cout << "open" << endl;
@@ -228,6 +245,9 @@ int main(int argc, char **argv) {
             return 1;
         }
         destAddr = (struct sockaddr_in *)destination->ai_addr;
+    } else {
+        destAddr = (struct sockaddr_in *) malloc(sizeof(*destAddr));
+        inet_aton(target.c_str(), &(destAddr->sin_addr));
     }
 
     //cout << inet_ntoa(destAddr->sin_addr) << endl;
@@ -371,7 +391,7 @@ int main(int argc, char **argv) {
             tcph->th_flags = TH_SYN;
 
             //calculate tcp checksum
-            tcph->th_sum = tcpsum((unsigned short *) buffer, (sizeof(struct tcpPhdr) + sizeof(struct tcphdr)));
+            tcph->th_sum = csum((unsigned short *) buffer, (sizeof(struct tcpPhdr) + sizeof(struct tcphdr)));
 
             //create and fill ip header
             struct ip *iph = (struct ip *) buffer2;
@@ -390,7 +410,7 @@ int main(int argc, char **argv) {
             memcpy(buffer2 + sizeof(struct ip), buffer + sizeof(struct tcpPhdr), sizeof(struct tcphdr));
 
             //calculate ip sum
-            iph->ip_sum = tcpsum((unsigned short *) buffer2, (sizeof(struct ip) + sizeof(struct tcphdr)));
+            iph->ip_sum = csum((unsigned short *) buffer2, (sizeof(struct ip) + sizeof(struct tcphdr)));
             
             if (sendto(sock, buffer2, iph->ip_len, 0, (struct sockaddr *)destAddr, sizeof(struct sockaddr_in)) < 0) {
                 perror("sendto() error");
@@ -416,6 +436,96 @@ int main(int argc, char **argv) {
             pcap_freecode(&filter);
         }
         pcap_close(handle);
+    }
+    if (argFlags[1] == 1) {
+        int one = 1;
+        const int *val = &one;
+               
+        int sock = socket(PF_INET, SOCK_RAW, IPPROTO_UDP);
+        if (sock < 0) {
+            cerr << "Error opening socket." << endl;
+            return 1;
+        }
+
+        if (setsockopt(sock, IPPROTO_IP, IP_HDRINCL, val, sizeof(one)) < 0) {
+            cerr << "Error setting socket options." << endl;
+            return 1;
+        }
+
+        //initialize pcap handle TODO LICENSE COMMENT FROM DEVDUNGEON using libpcap in c
+        char pcap_err_buffer[PCAP_ERRBUF_SIZE];
+        struct bpf_program filter;
+
+        int repeatFiltered = 0;
+
+        //header size
+        char buffer[8192];
+        //char buffer2[8192];
+        memset(buffer, 0, 8192);
+        //memset(buffer2, 0, 8192);
+
+        for (int i = 0; i < pu_ports.size(); i++) {
+            if (repeatFiltered == 0) { //print ports only once
+                cout << to_string(pu_ports[i]) + "/udp      ";
+            }
+            //set pcap
+            handle = pcap_open_live(interface.c_str(), BUFSIZ, 1, 1000, pcap_err_buffer);
+            if (handle == NULL) {
+                cerr << "Could not create pcap handle." << endl;
+                return 1;
+            }
+            string pcap_filter = "udp and src port " + to_string(pu_ports[i]) + " and dst port 50000";
+            int pcompileRet = pcap_compile(handle, &filter, pcap_filter.c_str(), 0, PCAP_NETMASK_UNKNOWN);
+            if (pcompileRet == -1) {
+                cerr << "Could not compile filter string." << endl;
+                return 1;
+            }
+
+            //address family
+            sourceAddr->sin_family = AF_INET;
+            destAddr->sin_family = AF_INET;
+
+            //ports
+            sourceAddr->sin_port = htons(50000);
+            destAddr->sin_port = htons(pu_ports[i]);
+
+            //create and fill ip header
+            struct ip *iph = (struct ip *) buffer;
+            iph->ip_hl = 5;
+            iph->ip_v = 4;
+            iph->ip_tos = 16;
+            iph->ip_len = sizeof(struct ip) + sizeof(struct udphdr);
+            iph->ip_id = htons(54321);
+            iph->ip_off = 0;
+            iph->ip_ttl = 64;
+            iph->ip_p = 17;
+            iph->ip_sum = 0;
+            iph->ip_src = sourceAddr->sin_addr;
+            iph->ip_dst = destAddr->sin_addr;
+
+            //create and fill udp header
+            struct udphdr *udph = (struct udphdr *) (buffer + sizeof(struct ip));
+            udph->uh_sport = htons(50000);
+            udph->uh_dport = htons(pu_ports[i]);
+            udph->uh_ulen = htons(sizeof(struct udphdr));
+            udph->uh_sum = 0;
+
+            iph->ip_sum = csum((unsigned short *) buffer, (sizeof(struct ip) + sizeof(struct udphdr)));
+        
+            if (sendto(sock, buffer, iph->ip_len, 0, (struct sockaddr *)destAddr, sizeof(struct sockaddr_in)) < 0) {
+                perror("sendto() error");
+                return 1;
+            }
+
+            //fix packet capture
+            pcap_loop(handle, 1, udp_packet_handler, NULL);
+            pcap_freecode(&filter);
+        }
+        pcap_close(handle);
+    }
+
+    if(regex_match(target, ipv4pattern)) {
+        free(destAddr);
     }
 
     freeaddrinfo(destination);
