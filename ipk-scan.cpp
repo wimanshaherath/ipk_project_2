@@ -450,9 +450,7 @@ int main(int argc, char **argv) {
 
         //header size
         char buffer[8192];
-        //char buffer2[8192];
         memset(buffer, 0, 8192);
-        //memset(buffer2, 0, 8192);
 
         for (int i = 0; i < pu_ports.size(); i++) {
             if (repeatFiltered == 0) { //print ports only once
@@ -464,7 +462,7 @@ int main(int argc, char **argv) {
                 cerr << "Could not create pcap handle." << endl;
                 return 1;
             }
-            string pcap_filter = "icmp and icmp[icmptype] == icmp-unreach and dst " + string(inet_ntoa(sourceAddr->sin_addr)) + " and src " + string(inet_ntoa(destAddr->sin_addr));
+            string pcap_filter = "icmp and icmp[icmptype] == 3 and icmp[icmpcode] == 3 and dst " + string(inet_ntoa(sourceAddr->sin_addr)) + " and src " + string(inet_ntoa(destAddr->sin_addr));
             int pcompileRet = pcap_compile(handle, &filter, pcap_filter.c_str(), 0, PCAP_NETMASK_UNKNOWN);
             if (pcompileRet == -1) {
                 cerr << "Could not compile filter string." << endl;
